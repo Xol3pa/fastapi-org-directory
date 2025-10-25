@@ -1,0 +1,44 @@
+# Python / FastAPI
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.py,cover
+*.so
+
+# Environments
+.venv/
+.env
+
+# Byte-compiled / optimized / DLL files
+*.egg-info/
+.eggs/
+*.egg
+
+# Logs & local data
+*.log
+*.sqlite3
+
+# IDE / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Coverage / testing
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+
+# Docker
+*.pid
+postgres_data/
+
+# OS
+.DS_Store
+Thumbs.db

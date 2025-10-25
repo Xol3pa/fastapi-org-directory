@@ -1,0 +1,12 @@
+from fastapi import HTTPException, Security, status
+from fastapi.security import APIKeyHeader
+
+from src.config import settings
+
+api_key_header = APIKeyHeader(name=settings.api_key_header, auto_error=False)
+
+
+async def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
+    if not api_key or api_key != settings.api_key:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Некорректный API ключ.")
+    return api_key
