@@ -4,61 +4,69 @@ import math
 from typing import Iterable
 from uuid import UUID
 
-from sqlalchemy import Select, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, selectinload
 
-from src.models import Activity, Building, Organization
+from src.models import Organization
+from src.repositories.organization import OrganizationRepository
 
 EARTH_RADIUS_KM = 6371.0
 
 
-def _base_stmt() -> Select[tuple[Organization]]:
-    return (
-        select(Organization)
-        .options(
-            selectinload(Organization.activities),
-            selectinload(Organization.phone_numbers),
-            joinedload(Organization.building),
+class OrganizationService:
+    """Бизнес-операции над организациями."""
+
+    def __init__(self, repository: OrganizationRepository):
+        self._repository = repository
+
+    async def get_by_id(self, organization_id: UUID) -> Organization | None:
+        return await self._repository.get_by_id(organization_id)
+
+    async def search_by_name(self, name: str) -> list[Organization]:
+        pattern = f"%{name.strip()}%"
+        return await self._repository.search_by_name_pattern(pattern)
+
+    async def list_by_building(self, building_id: UUID) -> list[Organization]:
+        return await self._repository.list_by_building(building_id)
+
+    async def list_by_activity_ids(self, activity_ids: Iterable[UUID]) -> list[Organization]:
+        return await self._repository.list_by_activity_ids(activity_ids)
+
+    async def list_within_radius(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+    ) -> list[Organization]:
+        if radius_km <= 0:
+            return []
+
+        lat_delta = radius_km / 111.0
+        lon_delta = radius_km / (111.0 * max(math.cos(math.radians(latitude)), 0.00001))
+
+        candidates = await self._repository.list_in_lat_lon_window(
+            latitude=latitude,
+            longitude=longitude,
+            lat_delta=lat_delta,
+            lon_delta=lon_delta,
         )
-    )
+        return [
+            organization
+            for organization in candidates
+            if _haversine(latitude, longitude, organization.building.latitude, organization.building.longitude)
+            <= radius_km
+        ]
 
+    async def list_in_bbox(
+        self,
+        min_latitude: float,
+        max_latitude: float,
+        min_longitude: float,
+        max_longitude: float,
+    ) -> list[Organization]:
+        return await self._repository.list_in_bbox(min_latitude, max_latitude, min_longitude, max_longitude)
 
-async def get_by_id(session: AsyncSession, organization_id: UUID) -> Organization | None:
-    result = await session.execute(
-        _base_stmt().where(Organization.id == organization_id)
-    )
-    return result.scalar_one_or_none()
-
-
-async def search_by_name(session: AsyncSession, name: str) -> list[Organization]:
-    pattern = f"%{name.strip()}%"
-    result = await session.execute(
-        _base_stmt().where(Organization.name.ilike(pattern))
-    )
-    return list(result.scalars().all())
-
-
-async def list_by_building(session: AsyncSession, building_id: UUID) -> list[Organization]:
-    result = await session.execute(
-        _base_stmt().where(Organization.building_id == building_id)
-    )
-    return list(result.scalars().all())
-
-
-async def list_by_activity_ids(session: AsyncSession, activity_ids: Iterable[UUID]) -> list[Organization]:
-    ids = list(activity_ids)
-    if not ids:
-        return []
-
-    stmt = (
-        _base_stmt()
-        .join(Organization.activities)
-        .where(Activity.id.in_(ids))
-        .distinct()
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    async def list_all(self) -> list[Organization]:
+        return await self._repository.list_all()
 
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -70,34 +78,38 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return EARTH_RADIUS_KM * c
 
 
+def _service(session: AsyncSession) -> OrganizationService:
+    return OrganizationService(OrganizationRepository(session))
+
+
+async def get_by_id(session: AsyncSession, organization_id: UUID) -> Organization | None:
+    service = _service(session)
+    return await service.get_by_id(organization_id)
+
+
+async def search_by_name(session: AsyncSession, name: str) -> list[Organization]:
+    service = _service(session)
+    return await service.search_by_name(name)
+
+
+async def list_by_building(session: AsyncSession, building_id: UUID) -> list[Organization]:
+    service = _service(session)
+    return await service.list_by_building(building_id)
+
+
+async def list_by_activity_ids(session: AsyncSession, activity_ids: Iterable[UUID]) -> list[Organization]:
+    service = _service(session)
+    return await service.list_by_activity_ids(activity_ids)
+
+
 async def list_within_radius(
     session: AsyncSession,
     latitude: float,
     longitude: float,
     radius_km: float,
 ) -> list[Organization]:
-    if radius_km <= 0:
-        return []
-
-    lat_delta = radius_km / 111.0
-    lon_delta = radius_km / (111.0 * max(math.cos(math.radians(latitude)), 0.00001))
-
-    stmt = _base_stmt().join(Organization.building).where(
-        and_(
-            Building.latitude.between(latitude - lat_delta, latitude + lat_delta),
-            Building.longitude.between(longitude - lon_delta, longitude + lon_delta),
-        )
-    )
-
-    result = await session.execute(stmt)
-    candidates = list(result.scalars().all())
-
-    return [
-        organization
-        for organization in candidates
-        if _haversine(latitude, longitude, organization.building.latitude, organization.building.longitude)
-        <= radius_km
-    ]
+    service = _service(session)
+    return await service.list_within_radius(latitude=latitude, longitude=longitude, radius_km=radius_km)
 
 
 async def list_in_bbox(
@@ -107,21 +119,16 @@ async def list_in_bbox(
     min_longitude: float,
     max_longitude: float,
 ) -> list[Organization]:
-    stmt = (
-        _base_stmt()
-        .join(Organization.building)
-        .where(
-            and_(
-                Building.latitude.between(min_latitude, max_latitude),
-                Building.longitude.between(min_longitude, max_longitude),
-            )
-        )
+    service = _service(session)
+    return await service.list_in_bbox(
+        min_latitude=min_latitude,
+        max_latitude=max_latitude,
+        min_longitude=min_longitude,
+        max_longitude=max_longitude,
     )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
 
 
 async def list_all(session: AsyncSession) -> list[Organization]:
-    result = await session.execute(_base_stmt())
-    return list(result.scalars().all())
+    service = _service(session)
+    return await service.list_all()
 
