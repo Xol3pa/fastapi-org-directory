@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import verify_api_key
 from src.db.session import get_session
+from src.mappers import map_organization_detail, map_organization_details
 from src.schemas import OrganizationDetail
 from src.services import activity as activity_service
 from src.services import organization as organization_service
@@ -16,12 +17,6 @@ router = APIRouter(
     tags=["Organizations"],
     dependencies=[Depends(verify_api_key)],
 )
-
-
-def _serialize(org) -> OrganizationDetail:
-    return OrganizationDetail.model_validate(org)
-
-
 @router.get("/", response_model=list[OrganizationDetail])
 async def list_organizations(
     name: str | None = Query(default=None, min_length=1, description="Часть названия."),
@@ -47,7 +42,7 @@ async def list_organizations(
     if not organizations and name is None and activity_id is None:
         organizations = await organization_service.list_all(session)
 
-    return [_serialize(org) for org in organizations]
+    return map_organization_details(organizations)
 
 
 @router.get("/geo/search", response_model=list[OrganizationDetail])
@@ -106,7 +101,7 @@ async def search_by_geo(
         results = await organization_service.list_all(session)
 
     unique = {org.id: org for org in results}
-    return [_serialize(org) for org in unique.values()]
+    return map_organization_details(unique.values())
 
 
 @router.get("/{organization_id}", response_model=OrganizationDetail)
@@ -117,4 +112,4 @@ async def retrieve(
     organization = await organization_service.get_by_id(session, organization_id)
     if organization is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Организация не найдена.")
-    return _serialize(organization)
+    return map_organization_detail(organization)

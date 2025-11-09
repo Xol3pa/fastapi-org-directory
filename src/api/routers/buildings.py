@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import verify_api_key
 from src.db.session import get_session
+from src.mappers import map_buildings, map_organization_details
 from src.schemas import BuildingRead, OrganizationDetail
 from src.services import building as building_service
 from src.services import organization as organization_service
@@ -23,7 +24,7 @@ async def list_buildings(
     session: AsyncSession = Depends(get_session),
 ) -> list[BuildingRead]:
     buildings = await building_service.list_buildings(session)
-    return [BuildingRead.model_validate(item) for item in buildings]
+    return map_buildings(buildings)
 
 
 @router.get("/{building_id}/organizations", response_model=list[OrganizationDetail])
@@ -36,4 +37,4 @@ async def organizations_by_building(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Здание не найдено.")
 
     organizations = await organization_service.list_by_building(session, building_id)
-    return [OrganizationDetail.model_validate(org) for org in organizations]
+    return map_organization_details(organizations)
